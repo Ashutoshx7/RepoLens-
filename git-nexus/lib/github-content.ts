@@ -1,7 +1,6 @@
 "use server";
 
 import { Octokit } from 'octokit';
-import { createOctokit } from './github-client';
 import type { FileNode } from './types';
 
 // Simple in-memory cache (Note: Persists only in long-running processes like local dev)
@@ -24,15 +23,24 @@ const getCachedOrFetch = async <T>(
     return data;
 };
 
+// Create Octokit instance on the server - accepts optional token from client
+function createServerOctokit(token?: string | null): Octokit {
+    if (token) {
+        return new Octokit({ auth: token });
+    }
+    return new Octokit();
+}
+
 export const fetchRepoContents = async (
     owner: string,
     repo: string,
-    path: string = ''
+    path: string = '',
+    token?: string | null
 ): Promise<FileNode[]> => {
     const cacheKey = `contents_${owner}_${repo}_${path}`;
 
     return getCachedOrFetch(cacheKey, async () => {
-        const octokit = createOctokit();
+        const octokit = createServerOctokit(token);
 
         try {
             const { data } = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
@@ -77,12 +85,13 @@ export const fetchRepoContents = async (
 export const fetchFileContent = async (
     owner: string,
     repo: string,
-    path: string
+    path: string,
+    token?: string | null
 ): Promise<string> => {
     const cacheKey = `file_${owner}_${repo}_${path}`;
 
     return getCachedOrFetch(cacheKey, async () => {
-        const octokit = createOctokit();
+        const octokit = createServerOctokit(token);
 
         try {
             const { data } = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {

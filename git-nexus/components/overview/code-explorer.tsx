@@ -1,136 +1,331 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { FileNode } from "@/lib/types";
 import { fetchRepoContents, fetchFileContent } from "@/lib/github-content";
-import { cn } from "@/lib/utils";
+import { cn, getGitHubToken } from "@/lib/utils";
 import {
-    Folder, FileCode, ChevronRight, ChevronDown,
-    Loader2, GitBranch, File, Copy,
+    Folder, FolderOpen, FileCode, ChevronRight, ChevronDown,
+    Loader2, GitBranch, File, Copy, Check,
     FileJson, FileType, FileImage, FileText, X, Search, MoreHorizontal,
     Files, GitGraph, Settings, Terminal, Play, LayoutPanelLeft, Maximize2, Command, AlertCircle
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Highlight, themes } from "prism-react-renderer";
 
 interface CodeExplorerProps {
     owner: string;
     repo: string;
 }
 
-// Simple syntax highlighter for visual flair without heavy deps
-const highlightCode = (code: string, language: string) => {
-    if (!code) return [];
+// Extended FileNode with children for tree structure
+interface TreeNode extends FileNode {
+    children?: TreeNode[];
+    isLoading?: boolean;
+    isLoaded?: boolean;
+}
 
-    // Basic keywords
-    const keywords = /\b(import|export|from|const|let|var|function|return|if|else|for|while|class|interface|type|async|await|try|catch|new|this|typeof|void)\b/g;
-    // Strings
-    const strings = /(['"`])(.*?)\1/g;
-    // Comments
-    const comments = /(\/\/.*|\/\*[\s\S]*?\*\/)/g;
-    // Numbers
-    const numbers = /\b(\d+)\b/g;
-    // JSX Tags (rough approximation)
-    const jsxTags = /(<\/?)([a-zA-Z0-9]+)(.*?>)/g;
-
-    // Split by newlines to handle per-line rendering
-    return code.split('\n').map((line, i) => {
-        let formatted = line
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-
-        if (language === 'ts' || language === 'js' || language === 'tsx' || language === 'jsx') {
-            // We can't actually safely replace with HTML strings in a single pass due to overlapping matches
-            // So we'll just do a very basic pass for keywords and comments for the "vibe"
-            // Ideally we'd use Prism, but for a lightweight "vibe" component:
-
-            // Highlights keywords
-            formatted = formatted.replace(keywords, '<span class="text-purple-400 font-bold">$1</span>');
-            // Highlights strings (this is fragile in regex but okay for display)
-            formatted = formatted.replace(strings, '<span class="text-green-400">$1$2$1</span>');
-            // Highlights comments
-            formatted = formatted.replace(comments, '<span class="text-zinc-500 italic">$1</span>');
-            // Highlights types (capitalized words)
-            formatted = formatted.replace(/\b([A-Z][a-zA-Z0-9]*)\b/g, '<span class="text-yellow-300">$1</span>');
-        }
-
-        return <div key={i} dangerouslySetInnerHTML={{ __html: formatted || ' ' }} />;
-    });
+// Map file extensions to Prism language names
+const getLanguageFromExtension = (filename: string): string => {
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    const languageMap: Record<string, string> = {
+        ts: 'typescript',
+        tsx: 'tsx',
+        js: 'javascript',
+        jsx: 'jsx',
+        json: 'json',
+        css: 'css',
+        scss: 'scss',
+        html: 'markup',
+        xml: 'markup',
+        svg: 'markup',
+        md: 'markdown',
+        mdx: 'markdown',
+        py: 'python',
+        rb: 'ruby',
+        go: 'go',
+        rs: 'rust',
+        java: 'java',
+        c: 'c',
+        cpp: 'cpp',
+        h: 'c',
+        hpp: 'cpp',
+        cs: 'csharp',
+        php: 'php',
+        sh: 'bash',
+        bash: 'bash',
+        zsh: 'bash',
+        yml: 'yaml',
+        yaml: 'yaml',
+        sql: 'sql',
+        graphql: 'graphql',
+        gql: 'graphql',
+        dockerfile: 'docker',
+        makefile: 'makefile',
+        gitignore: 'git',
+        env: 'bash',
+    };
+    return languageMap[ext] || 'plaintext';
 };
 
+// Recursive Tree Item Component
+function TreeItem({
+    node,
+    depth,
+    expandedPaths,
+    onToggle,
+    onFileClick,
+    selectedPath,
+    getFileIcon,
+}: {
+    node: TreeNode;
+    depth: number;
+    expandedPaths: Set<string>;
+    onToggle: (path: string) => void;
+    onFileClick: (file: TreeNode) => void;
+    selectedPath: string | null;
+    getFileIcon: (filename: string) => React.ReactElement;
+}) {
+    const isExpanded = expandedPaths.has(node.path);
+    const isDirectory = node.type === "directory";
+    const isSelected = selectedPath === node.path;
+    const paddingLeft = 12 + depth * 12;
+
+    return (
+        <>
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.15 }}
+                onClick={() => isDirectory ? onToggle(node.path) : onFileClick(node)}
+                className={cn(
+                    "flex items-center gap-1 py-[3px] cursor-pointer hover:bg-[#2a2d2e] border-l-2 border-transparent transition-all group select-none text-[13px]",
+                    isSelected && "bg-[#37373d] text-white border-blue-500"
+                )}
+                style={{ paddingLeft }}
+            >
+                {isDirectory ? (
+                    <>
+                        <motion.div
+                            animate={{ rotate: isExpanded ? 90 : 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="shrink-0"
+                        >
+                            <ChevronRight className="size-3 text-zinc-500" />
+                        </motion.div>
+                        {isExpanded ? (
+                            <FolderOpen className="size-4 text-yellow-500/80 shrink-0" />
+                        ) : (
+                            <Folder className="size-4 text-yellow-500/60 shrink-0" />
+                        )}
+                    </>
+                ) : (
+                    <span className="ml-[14px] flex items-center shrink-0">
+                        {getFileIcon(node.name)}
+                    </span>
+                )}
+                <span className={cn(
+                    "truncate ml-1",
+                    isDirectory ? "text-zinc-300" : "text-zinc-400 group-hover:text-zinc-200",
+                    isSelected && "text-white"
+                )}>
+                    {node.name}
+                </span>
+                {node.isLoading && (
+                    <Loader2 className="size-3 text-zinc-500 animate-spin ml-auto mr-2" />
+                )}
+            </motion.div>
+
+            {/* Render children if expanded */}
+            <AnimatePresence>
+                {isDirectory && isExpanded && node.children && (
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="overflow-hidden"
+                    >
+                        {node.children.map((child) => (
+                            <TreeItem
+                                key={child.path}
+                                node={child}
+                                depth={depth + 1}
+                                expandedPaths={expandedPaths}
+                                onToggle={onToggle}
+                                onFileClick={onFileClick}
+                                selectedPath={selectedPath}
+                                getFileIcon={getFileIcon}
+                            />
+                        ))}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </>
+    );
+}
+
 export default function CodeExplorer({ owner, repo }: CodeExplorerProps) {
-    const [currentPath, setCurrentPath] = useState<string>("");
-    const [files, setFiles] = useState<FileNode[]>([]);
+    const [tree, setTree] = useState<TreeNode[]>([]);
+    const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(true);
-    const [selectedFile, setSelectedFile] = useState<FileNode | null>(null);
+    const [selectedFile, setSelectedFile] = useState<TreeNode | null>(null);
     const [fileContent, setFileContent] = useState<string | null>(null);
     const [loadingContent, setLoadingContent] = useState(false);
-    const [sidebarWidth, setSidebarWidth] = useState(260);
+    const [sidebarWidth] = useState(280);
     const [activeSideTab, setActiveSideTab] = useState("explorer");
     const [terminalOpen, setTerminalOpen] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // Initial load
+    // Load root directory on mount
     useEffect(() => {
-        loadPath("");
+        loadRootDirectory();
     }, [owner, repo]);
 
-    const loadPath = async (path: string) => {
+    const loadRootDirectory = async () => {
         try {
             setLoading(true);
             setError(null);
-            const data = await fetchRepoContents(owner, repo, path);
+            const token = getGitHubToken();
+            const data = await fetchRepoContents(owner, repo, "", token);
             if (!data || data.length === 0) {
-                // If root and empty, it's an error usually
-                if (!path) setError("No files found. Is the repository empty or private?");
+                setError("No files found. Is the repository empty or private?");
             }
-            setFiles(data || []);
+            // Convert to tree nodes
+            const treeNodes: TreeNode[] = (data || []).map(item => ({
+                ...item,
+                children: item.type === "directory" ? undefined : undefined,
+                isLoading: false,
+                isLoaded: false,
+            }));
+            setTree(treeNodes);
         } catch (error: any) {
-            console.error("Failed to load path:", error);
-            setError(error.message || "Failed to load directory.");
+            console.error("Failed to load root:", error);
+            setError(error.message || "Failed to load repository.");
         } finally {
             setLoading(false);
         }
     };
 
-    const handleFileClick = async (file: FileNode) => {
-        if (file.type === "directory") {
-            loadPath(file.path);
-            setCurrentPath(file.path);
-        } else {
-            setSelectedFile(file);
-            setLoadingContent(true);
-            try {
-                const content = await fetchFileContent(owner, repo, file.path);
-                setFileContent(content);
-            } catch (error) {
-                console.error("Failed to load content:", error);
-                setFileContent("// Failed to load file content.");
-            } finally {
-                setLoadingContent(false);
+    // Load children for a directory
+    const loadDirectoryChildren = useCallback(async (path: string) => {
+        const token = getGitHubToken();
+
+        // Mark node as loading
+        setTree(prev => updateNodeInTree(prev, path, { isLoading: true }));
+
+        try {
+            const data = await fetchRepoContents(owner, repo, path, token);
+            const children: TreeNode[] = (data || []).map(item => ({
+                ...item,
+                children: item.type === "directory" ? undefined : undefined,
+                isLoading: false,
+                isLoaded: false,
+            }));
+
+            // Update tree with children
+            setTree(prev => updateNodeInTree(prev, path, {
+                children,
+                isLoading: false,
+                isLoaded: true,
+            }));
+        } catch (error) {
+            console.error("Failed to load directory:", error);
+            setTree(prev => updateNodeInTree(prev, path, { isLoading: false }));
+        }
+    }, [owner, repo]);
+
+    // Helper to update a node in the tree
+    const updateNodeInTree = (nodes: TreeNode[], path: string, updates: Partial<TreeNode>): TreeNode[] => {
+        return nodes.map(node => {
+            if (node.path === path) {
+                return { ...node, ...updates };
             }
+            if (node.children) {
+                return { ...node, children: updateNodeInTree(node.children, path, updates) };
+            }
+            return node;
+        });
+    };
+
+    // Find node in tree
+    const findNodeInTree = (nodes: TreeNode[], path: string): TreeNode | null => {
+        for (const node of nodes) {
+            if (node.path === path) return node;
+            if (node.children) {
+                const found = findNodeInTree(node.children, path);
+                if (found) return found;
+            }
+        }
+        return null;
+    };
+
+    // Toggle directory expand/collapse
+    const handleToggle = useCallback(async (path: string) => {
+        const node = findNodeInTree(tree, path);
+        if (!node || node.type !== "directory") return;
+
+        const isCurrentlyExpanded = expandedPaths.has(path);
+
+        if (isCurrentlyExpanded) {
+            // Collapse
+            setExpandedPaths(prev => {
+                const next = new Set(prev);
+                next.delete(path);
+                return next;
+            });
+        } else {
+            // Expand - load children if not loaded
+            if (!node.isLoaded && !node.isLoading) {
+                await loadDirectoryChildren(path);
+            }
+            setExpandedPaths(prev => new Set(prev).add(path));
+        }
+    }, [tree, expandedPaths, loadDirectoryChildren]);
+
+    // Handle file click
+    const handleFileClick = async (file: TreeNode) => {
+        setSelectedFile(file);
+        setLoadingContent(true);
+        try {
+            const token = getGitHubToken();
+            const content = await fetchFileContent(owner, repo, file.path, token);
+            setFileContent(content);
+        } catch (error) {
+            console.error("Failed to load content:", error);
+            setFileContent("// Failed to load file content.");
+        } finally {
+            setLoadingContent(false);
         }
     };
 
     const getFileIcon = (filename: string) => {
         const ext = filename.split('.').pop()?.toLowerCase();
+        const name = filename.toLowerCase();
+
+        // Special files
+        if (name === 'package.json') return <FileJson className="size-4 text-green-500" />;
+        if (name === 'tsconfig.json') return <FileJson className="size-4 text-blue-400" />;
+        if (name.includes('readme')) return <FileText className="size-4 text-blue-300" />;
+        if (name.startsWith('.git')) return <FileCode className="size-4 text-orange-400" />;
+        if (name.startsWith('.env')) return <FileCode className="size-4 text-yellow-600" />;
+
         switch (ext) {
-            case 'ts': case 'tsx': return <FileCode className="size-4 text-blue-400" />;
-            case 'js': case 'jsx': return <FileCode className="size-4 text-yellow-400" />;
-            case 'css': case 'scss': return <FileType className="size-4 text-sky-400" />;
+            case 'ts': return <FileCode className="size-4 text-blue-400" />;
+            case 'tsx': return <FileCode className="size-4 text-blue-500" />;
+            case 'js': return <FileCode className="size-4 text-yellow-400" />;
+            case 'jsx': return <FileCode className="size-4 text-yellow-500" />;
+            case 'css': case 'scss': case 'sass': return <FileType className="size-4 text-pink-400" />;
             case 'json': return <FileJson className="size-4 text-yellow-500" />;
-            case 'md': return <FileText className="size-4 text-purple-400" />;
-            case 'png': case 'jpg': case 'svg': return <FileImage className="size-4 text-green-400" />;
-            case 'gitignore': return <FileCode className="size-4 text-orange-400" />;
+            case 'md': case 'mdx': return <FileText className="size-4 text-blue-300" />;
+            case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'ico':
+                return <FileImage className="size-4 text-purple-400" />;
+            case 'html': return <FileCode className="size-4 text-orange-500" />;
+            case 'yml': case 'yaml': return <FileCode className="size-4 text-red-400" />;
+            case 'lock': return <File className="size-4 text-zinc-600" />;
             default: return <File className="size-4 text-zinc-500" />;
         }
     };
-
-    const highlightedContent = useMemo(() => {
-        if (!fileContent || !selectedFile) return [];
-        const ext = selectedFile.name.split('.').pop()?.toLowerCase() || '';
-        return highlightCode(fileContent, ext);
-    }, [fileContent, selectedFile]);
 
     return (
         <div className="h-[800px] border border-zinc-800 rounded-xl overflow-hidden flex flex-col bg-[#1e1e1e] text-zinc-300 shadow-2xl ring-1 ring-white/10 font-sans relative selection:bg-blue-500/30">
@@ -187,68 +382,41 @@ export default function CodeExplorer({ owner, repo }: CodeExplorerProps) {
                             <MoreHorizontal className="size-4 cursor-pointer hover:text-zinc-300" />
                         </div>
 
-                        {/* Repository Root Item */}
+                        {/* Repository Root Header */}
                         <div
-                            className="px-2 py-1 flex items-center gap-1.5 text-xs font-bold text-blue-400 cursor-pointer hover:bg-[#2a2d2e] select-none"
-                            onClick={() => { loadPath(""); setCurrentPath(""); }}
+                            className="px-2 py-1.5 flex items-center gap-1.5 text-[11px] font-bold text-zinc-400 cursor-pointer hover:bg-[#2a2d2e] select-none border-b border-[#2b2b2b]"
+                            onClick={() => { setExpandedPaths(new Set()); loadRootDirectory(); }}
                         >
                             <ChevronDown className="size-3" />
-                            <span className="uppercase">{repo}</span>
+                            <span className="uppercase tracking-wide">{repo}</span>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto px-0 pb-2 custom-scrollbar">
-                            {loading && !currentPath ? (
-                                <div className="space-y-2 p-4">
-                                    {[1, 2, 3].map(i => <div key={i} className="h-4 bg-[#333] rounded animate-pulse w-2/3" />)}
+                        <div className="flex-1 overflow-y-auto pb-2 custom-scrollbar">
+                            {loading ? (
+                                <div className="space-y-1.5 p-3">
+                                    {[1, 2, 3, 4, 5].map(i => (
+                                        <div key={i} className="h-4 bg-[#333] rounded animate-pulse" style={{ width: `${60 + Math.random() * 30}%` }} />
+                                    ))}
                                 </div>
                             ) : error ? (
                                 <div className="p-4 flex flex-col items-center text-center">
                                     <AlertCircle className="size-6 text-red-400 mb-2" />
                                     <span className="text-xs text-red-300">{error}</span>
-                                    <button onClick={() => loadPath("")} className="mt-4 text-[10px] bg-red-500/10 text-red-400 px-2 py-1 rounded hover:bg-red-500/20">Retry</button>
+                                    <button onClick={loadRootDirectory} className="mt-4 text-[10px] bg-red-500/10 text-red-400 px-2 py-1 rounded hover:bg-red-500/20">Retry</button>
                                 </div>
                             ) : (
-                                <div className="flex flex-col">
-                                    {/* Back Item */}
-                                    {currentPath && (
-                                        <div
-                                            className="pl-6 px-2 py-1 flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-[#2a2d2e] cursor-pointer"
-                                            onClick={() => {
-                                                const parts = currentPath.split('/');
-                                                parts.pop();
-                                                const up = parts.join('/');
-                                                loadPath(up);
-                                                setCurrentPath(up);
-                                            }}
-                                        >
-                                            <div className="size-4 flex items-center justify-center">..</div>
-                                        </div>
-                                    )}
-
-                                    {files.map((file) => (
-                                        <div
-                                            key={file.path}
-                                            onClick={() => handleFileClick(file)}
-                                            className={cn(
-                                                "pl-4 px-2 py-1 flex items-center gap-1.5 cursor-pointer hover:bg-[#2a2d2e] border-l-2 border-transparent transition-colors group select-none relative text-xs",
-                                                selectedFile?.path === file.path && "bg-[#37373d] text-white border-blue-400"
-                                            )}
-                                        >
-                                            {file.type === 'directory' ? (
-                                                <>
-                                                    <ChevronRight className="size-3 text-zinc-500 shrink-0" />
-                                                    <Folder className="size-4 text-zinc-400 group-hover:text-white shrink-0" />
-                                                </>
-                                            ) : (
-                                                <span className="ml-[18px] flex items-center gap-2 shrink-0">
-                                                    {getFileIcon(file.name)}
-                                                </span>
-                                            )}
-                                            <span className={cn(
-                                                "truncate text-zinc-400 group-hover:text-zinc-200",
-                                                selectedFile?.path === file.path && "text-white"
-                                            )}>{file.name}</span>
-                                        </div>
+                                <div className="pt-1">
+                                    {tree.map((node) => (
+                                        <TreeItem
+                                            key={node.path}
+                                            node={node}
+                                            depth={0}
+                                            expandedPaths={expandedPaths}
+                                            onToggle={handleToggle}
+                                            onFileClick={handleFileClick}
+                                            selectedPath={selectedFile?.path || null}
+                                            getFileIcon={getFileIcon}
+                                        />
                                     ))}
                                 </div>
                             )}
@@ -265,7 +433,7 @@ export default function CodeExplorer({ owner, repo }: CodeExplorerProps) {
                                 {getFileIcon(selectedFile.name)}
                                 <span className="font-medium truncate">{selectedFile.name}</span>
                                 <button
-                                    onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}
+                                    onClick={(e) => { e.stopPropagation(); setSelectedFile(null); setFileContent(null); }}
                                     className="ml-auto opacity-0 group-hover:opacity-100 hover:bg-[#333] rounded p-0.5"
                                 >
                                     <X className="size-3 text-zinc-400" />
@@ -285,19 +453,43 @@ export default function CodeExplorer({ owner, repo }: CodeExplorerProps) {
                                     <span className="text-xs text-zinc-500">Fetching content...</span>
                                 </div>
                             ) : (
-                                <div className="h-full flex overflow-hidden">
-                                    {/* Line Numbers */}
-                                    <div className="w-12 bg-[#1e1e1e] text-right py-4 pr-3 select-none flex-shrink-0 border-r border-[#2b2b2b]">
-                                        {fileContent?.split('\n').map((_, i) => (
-                                            <div key={i} className="text-xs font-mono text-[#6e7681] leading-6">{i + 1}</div>
-                                        ))}
-                                    </div>
-                                    {/* Code */}
-                                    <div className="flex-1 overflow-auto custom-scrollbar bg-[#1e1e1e]">
-                                        <div className="p-4 min-w-max font-mono text-xs leading-6 text-zinc-300 tab-4">
-                                            {highlightedContent}
-                                        </div>
-                                    </div>
+                                <div className="h-full overflow-auto custom-scrollbar bg-[#1e1e1e]">
+                                    {fileContent && (
+                                        <Highlight
+                                            theme={themes.vsDark}
+                                            code={fileContent}
+                                            language={getLanguageFromExtension(selectedFile.name)}
+                                        >
+                                            {({ className, style, tokens, getLineProps, getTokenProps }) => (
+                                                <pre
+                                                    className="font-mono text-[13px] leading-6 p-0 m-0"
+                                                    style={{ ...style, background: 'transparent', minWidth: 'max-content' }}
+                                                >
+                                                    {tokens.map((line, i) => {
+                                                        const lineProps = getLineProps({ line });
+                                                        return (
+                                                            <div
+                                                                key={i}
+                                                                {...lineProps}
+                                                                className={cn(lineProps.className, "flex hover:bg-[#2a2d2e] transition-colors")}
+                                                            >
+                                                                {/* Line Number */}
+                                                                <span className="w-14 shrink-0 text-right pr-4 text-[#6e7681] select-none border-r border-[#2b2b2b] mr-4">
+                                                                    {i + 1}
+                                                                </span>
+                                                                {/* Line Content */}
+                                                                <span className="flex-1">
+                                                                    {line.map((token, key) => (
+                                                                        <span key={key} {...getTokenProps({ token })} />
+                                                                    ))}
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </pre>
+                                            )}
+                                        </Highlight>
+                                    )}
                                 </div>
                             )
                         ) : (
