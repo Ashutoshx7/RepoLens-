@@ -1,0 +1,242 @@
+import { SVGProps } from "react";
+
+// --- GSoC-Spy Types ---
+
+export interface ContributorStats {
+    username: string;
+    avatarUrl: string;
+    totalPRs: number;
+    mergedPRs: number;
+    openPRs: number;
+    closedPRs: number;
+    isMaintainer: boolean;
+}
+
+export interface PullRequest {
+    number: number;
+    title: string;
+    state: string;
+    created_at: string;
+    merged_at: string | null;
+    html_url: string;
+    repository_url: string;
+    repository_name?: string;
+    user: {
+        login: string;
+        avatar_url: string;
+    };
+}
+
+export interface RepoStats {
+    totalPRs: number;
+    contributors: ContributorStats[];
+    recentPRs: PullRequest[];
+}
+
+export interface UserStats {
+    username: string;
+    avatarUrl: string;
+    repositories: {
+        [key: string]: {
+            totalPRs: number;
+            mergedPRs: number;
+            openPRs: number;
+            closedPRs: number;
+        };
+    };
+    pullRequests: PullRequest[];
+    totalStats: {
+        totalPRs: number;
+        mergedPRs: number;
+        openPRs: number;
+        closedPRs: number;
+    };
+    isMaintainer: boolean;
+}
+
+export type TimeFilter = '2w' | '1m' | '3m' | '6m' | 'all';
+
+// --- Repo-Gist Types ---
+
+export interface FileNode {
+    name: string;
+    path: string;
+    type: "file" | "directory";
+    children?: FileNode[];
+    size?: number;
+    language?: string;
+    extension?: string;
+}
+
+export interface FileStats {
+    totalFiles: number;
+    totalDirectories: number;
+    languages: Record<string, number>;
+}
+
+export interface BranchInfo {
+    name: string;
+    commit: {
+        sha: string;
+        url: string;
+    };
+    protected: boolean;
+    isDefault: boolean;
+}
+
+export interface RepoMetadata {
+    name: string;
+    fullName: string;
+    description: string | null;
+    stars: number;
+    forks: number;
+    watchers: number;
+    language: string | null;
+    topics: string[];
+    defaultBranch: string;
+    createdAt: string;
+    updatedAt: string;
+    pushedAt: string;
+    size: number;
+    openIssues: number;
+    license: string | null;
+    isPrivate: boolean;
+    owner: {
+        login: string;
+        avatarUrl: string;
+        type: string;
+    };
+}
+
+export interface ScoreMetrics {
+    overall: number;
+    codeQuality: number;
+    documentation: number;
+    security: number;
+    maintainability: number;
+    testCoverage: number;
+    dependencies: number;
+}
+
+export interface AIInsight {
+    type: "strength" | "weakness" | "suggestion" | "warning";
+    category: string;
+    title: string;
+    description: string;
+    priority: "low" | "medium" | "high" | "critical";
+    affectedFiles?: string[];
+}
+
+export interface Refactor {
+    id: string;
+    title: string;
+    description: string;
+    impact: "low" | "medium" | "high";
+    effort: "low" | "medium" | "high";
+    category: string;
+    files: string[];
+    suggestedCode?: string;
+    codeExample?: string;
+}
+
+export interface Automation {
+    id: string;
+    type: "issue" | "pull-request" | "workflow";
+    title: string;
+    description: string;
+    body: string;
+    labels?: string[];
+    priority: "low" | "medium" | "high";
+}
+
+export interface ArchitectureComponent {
+    id: string;
+    name: string;
+    type:
+    | "frontend"
+    | "backend"
+    | "database"
+    | "service"
+    | "external"
+    | "middleware";
+    description: string;
+    technologies: string[];
+    connections: string[];
+}
+
+export interface DataFlowNode {
+    id: string;
+    name: string;
+    type: "source" | "process" | "store" | "output";
+    description: string;
+    connections?: string[]; // Added connections for consistency if needed, though not in original
+}
+
+export interface DataFlowEdge {
+    from: string;
+    to: string;
+    label: string;
+    dataType?: string;
+}
+
+export interface KeyFolder {
+    name: string;
+    description: string;
+}
+
+export interface MermaidDiagram {
+    type: "flowchart" | "sequenceDiagram" | "classDiagram" | "graph";
+    title: string;
+    code: string;
+}
+
+export interface DiagramsData {
+    architecture?: MermaidDiagram;
+    dataFlow?: MermaidDiagram;
+    components?: MermaidDiagram;
+}
+
+export interface AnalysisResult {
+    metadata: RepoMetadata;
+    branch?: string;
+    availableBranches?: BranchInfo[];
+    fileTree?: FileNode[];
+    fileStats?: FileStats;
+    techStack?: string[];
+    summary?: string;
+    whatItDoes?: string;
+    targetAudience?: string;
+    howToRun?: string[];
+    keyFolders?: KeyFolder[];
+    scores?: ScoreMetrics;
+    insights?: AIInsight[];
+    refactors?: Refactor[];
+    automations?: Automation[];
+    architecture?: ArchitectureComponent[];
+    dataFlow?: {
+        nodes: DataFlowNode[];
+        edges: DataFlowEdge[];
+    };
+    diagrams?: DiagramsData;
+}
+
+export type AnalysisStage =
+    | "idle"
+    | "fetching"
+    | "parsing"
+    | "analyzing"
+    | "complete"
+    | "error";
+
+export interface StreamingAnalysis {
+    stage: AnalysisStage;
+    progress: number;
+    currentStep: string;
+    error?: string;
+}
+
+export type IconProps = SVGProps<SVGSVGElement> & {
+    secondaryfill?: string;
+    strokewidth?: number;
+    title?: string;
+};
