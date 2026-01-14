@@ -88,13 +88,13 @@ export default function DashboardClient({
                 <Tabs defaultValue="overview" className="space-y-12">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                         <TabsList className="bg-transparent p-0 h-auto gap-8">
-                            {["Overview", "Contributors", "Health", "Code"].map((tab) => (
+                            {[{ label: "Overview", value: "overview" }, { label: "Contributors", value: "contributors" }, { label: "Intelligence", value: "health" }, { label: "Code", value: "code" }].map((tab) => (
                                 <TabsTrigger
-                                    key={tab}
-                                    value={tab.toLowerCase()}
+                                    key={tab.value}
+                                    value={tab.value}
                                     className="rounded-none px-0 py-2 text-sm font-medium text-zinc-400 data-[state=active]:bg-transparent data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 transition-all shadow-none border-b border-transparent data-[state=active]:border-black dark:data-[state=active]:border-white hover:text-zinc-600 dark:hover:text-zinc-300"
                                 >
-                                    {tab}
+                                    {tab.label}
                                 </TabsTrigger>
                             ))}
                         </TabsList>
