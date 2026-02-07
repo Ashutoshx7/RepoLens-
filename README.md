@@ -1,4 +1,4 @@
-# Git-Pulse
+# RepoLens
 
 > **The Ultimate Repository Intelligence Suite.**
 
