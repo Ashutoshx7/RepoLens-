@@ -40,7 +40,7 @@ export default function RootLayout({
       <body className={cn(
         fontSans.variable,
         fontHeading.variable,
-        "antialiased font-sans bg-black text-white"
+        "antialiased font-sans"
       )}>
         <AnalysisProvider>
           <ThemeProvider
