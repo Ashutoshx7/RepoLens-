@@ -2,7 +2,7 @@
 
 > **The Ultimate Repository Intelligence Suite.**
 
-Git-Pulse combines the powerful activity tracking of **GSoC-Spy** with the architectural insights of **Repo-Gist** into a single, cohesive, and beautiful application.
+RepoLens combines the powerful activity tracking of **GSoC-Spy** with the architectural insights of **Repo-Gist** into a single, cohesive, and beautiful application.
 
 ## ✨ Features
 
